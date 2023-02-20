@@ -1,6 +1,8 @@
 # Standard Modules
 import json
 import sys
+import time
+import asyncio
 
 # 3rd-party Modules
 import requests
@@ -36,6 +38,7 @@ with open('.config') as configFile:
 userId = secrets['userId']
 userPass = secrets['userPass']
 teleBotToken = secrets['teleBotToken']
+teleId = secrets['teleId']
 
 
 '''
@@ -65,21 +68,38 @@ class Session:
         self.loginResponseData = json.loads(self.loginResponse.text)
         if not self.loginResponseData['success']:
             print(self.loginResponseData['message'])
+            return False
         else:
             # Read the session token and user's name from the response data
             self.sessionToken = self.loginResponseData['data']['tokenContent']
-            # self.userName = self.loginResponseData['data']['?']
-            print(f"Successfully logged in as {self.userName}.")
+            self.userName = self.loginResponseData['data']['username']
+            return True
     
-    def queryTheorySlots(self, type, month):
+    def queryTheorySlots(self, type, month) -> dict:
         cookies = {
             'bbdc-token': self.sessionToken
         }
         headers = {
+            'Accept': 'application/json, text/plain, */*',
+            'Accept-Language': 'en-US,en;q=0.9',
             'Authorization': self.sessionToken,
             'Connection': 'keep-alive',
+            'Content-Type': 'application/json;charset=UTF-8',
+            # 'Cookie': 'bbdc-token=Bearer%20eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJCQkRDIiwiTlJJQyI6IlQwMDI2OTY3RyIsImV4cCI6MTY3NjkzNjQ1NH0.k6Dhyk8WO7rXOyne-ScY0-_KyEt_1rcctI62zWsec4w',
+            'DNT': '1',
+            'JSESSIONID': 'Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJBQ0NfSUQiOiI5NDg5NDYiLCJpc3MiOiJCQkRDIiwiTlJJQyI6IlQwMDI2OTY3RyIsImV4cCI6MTMwNTI1ODY4ODc0fQ.7hUw388BZ8761PYpYXdSNlhvkwEbSFEAUrxCwCx1WKU',
+            'Origin': 'https://booking.bbdc.sg',
+            'Referer': 'https://booking.bbdc.sg/',
+            'Sec-Fetch-Dest': 'empty',
+            'Sec-Fetch-Mode': 'cors',
+            'Sec-Fetch-Site': 'same-origin',
+            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36',
+            'sec-ch-ua': '"Not A(Brand";v="24", "Chromium";v="110"',
+            'sec-ch-ua-mobile': '?0',
+            'sec-ch-ua-platform': '"macOS"',
+            'sec-gpc': '1'
         }
-        json = {
+        json_data = {
             'courseType': '3C',
             'theoryType': type,
             'stageSubNo': '0',
@@ -90,11 +110,29 @@ class Session:
             'https://booking.bbdc.sg/bbdc-back-service/api/booking/theory/listTheoryLessonByDate',
             cookies=cookies,
             headers=headers,
-            json=json
+            json=json_data
         )
-        print(json.dumps(json.loads(response.text)))
+        return json.loads(response.text)
 
-# telegramBot = telegram.Bot(token=teleBotToken)
+class BookingSlot:
+    date = None
+    startTime = None
+    endTime = None
+    slotType = None
+
+    def __init__(self, date, startTime, endTime, slotType) -> None:
+        self.date = date
+        self.startTime = startTime
+        self.endTime = endTime
+        self.slotType = slotType
+    
+    def __str__(self) -> str:
+        return f"On {self.date}, start {self.startTime}, end {self.endTime}."
+
+
+telegramBot = telegram.Bot(token=teleBotToken)
+async def notifySlot(slot):
+    await telegramBot.send_message(chat_id=teleId, text=f"Slot found: {slot}")
 
 isLogin = 'n'
 while isLogin != 'y':
@@ -102,21 +140,50 @@ while isLogin != 'y':
     if isLogin == 'n':
         print("Quitting BBDC Booky - Bye!")
         sys.exit()
-    print("Please enter 'y' for yes, or 'n' for no.")
+    elif isLogin != 'y':
+        print("Please enter 'y' for yes, or 'n' for no.")
 
 tryAgain = 'y'
 while tryAgain == 'y':
     session = Session()
-    if not session.login():
+    isSuccess = session.login()
+    if not isSuccess:
         tryAgain = input("Error logging in. Try again? (y/n) > ")
-        while not (tryAgain == 'y' or tryAgain == 'n'):
-            tryAgain = input("Please enter 'y' for yes, or 'n' for no. > ")
         if tryAgain == 'n':
             print("Quitting BBDC Booky - Bye!")
             sys.exit()
+        elif tryAgain == 'y':
+            continue
+        else:
+            print("Did not enter y/n. Quitting program - Bye!")
+            sys.exit()
+    else:
+        print(f"Successfully logged in as {session.userName}.")
+        break
 
-userInput = ''
-while userInput != 'exit':
-# Type: FTE, FTP, etc.
-    userInput = input("Enter type of theory lesson to find this month (FTE/FTP) > ")
-    session.queryTheorySlots(userInput, 'feb')
+targetDate = '2023-02-24 00:00:00'
+
+async def queryLoop():
+    while True:
+    # Type: FTE, FTP, etc.
+        '''
+        userInput = input("Enter type of theory lesson to find this month (FTE/FTP) > ")
+        if userInput == 'exit':
+            print("Quitting BBDC Booky - Bye!")
+            sys.exit()
+        '''
+        slotsData = session.queryTheorySlots('FTP', 'feb')
+        slotsFound = list()
+        for date, slots in slotsData['data']['releasedSlotListGroupByDay'].items():
+            for slot in slots:
+                slotsFound.append(BookingSlot(slot['slotRefDate'], slot['startTime'], slot['endTime'], 'FTP'))
+        slotsFound = sorted(slotsFound, key=lambda x: x.startTime)
+        slotsFound = sorted(slotsFound, key=lambda x: x.date)
+        print("--- Slots found: ---")
+        for slot in slotsFound:
+            if slot.date == targetDate:
+                await notifySlot(slot)
+            print(slot)
+        time.sleep(60)
+
+asyncio.run(queryLoop())
