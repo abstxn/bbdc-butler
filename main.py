@@ -114,26 +114,75 @@ class Session:
         )
         return json.loads(response.text)
 
+    def queryFTTSlots(self, month) -> dict:
+        import requests
+        cookies = {
+            'bbdc-token': self.sessionToken,
+        }
+
+        headers = {
+            'Accept': 'application/json, text/plain, */*',
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Authorization': self.sessionToken,
+            'Connection': 'keep-alive',
+            'Content-Type': 'application/json;charset=UTF-8',
+            # 'Cookie': 'bbdc-token=Bearer%20eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJCQkRDIiwiTlJJQyI6IlQwMDI2OTY3RyIsImV4cCI6MTY3NzU1NDYyNX0.oSW6uDF_BJnxBmdkOIi0txOPc_bqgcrz0Q-LFsZRsm4',
+            'DNT': '1',
+            'JSESSIONID': 'Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJBQ0NfSUQiOiI5NDg5NDYiLCJpc3MiOiJCQkRDIiwiTlJJQyI6IlQwMDI2OTY3RyIsImV4cCI6MTMwNTI2NDg3MDU0fQ.Isd0IOy6E7lTuHGM0_wUevdVbKi3Rhd1ZzkoWPEotZQ',
+            'Origin': 'https://booking.bbdc.sg',
+            'Referer': 'https://booking.bbdc.sg/',
+            'Sec-Fetch-Dest': 'empty',
+            'Sec-Fetch-Mode': 'cors',
+            'Sec-Fetch-Site': 'same-origin',
+            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36',
+            'sec-ch-ua': '"Not A(Brand";v="24", "Chromium";v="110"',
+            'sec-ch-ua-mobile': '?0',
+            'sec-ch-ua-platform': '"macOS"',
+            'sec-gpc': '1',
+        }
+
+        json_data = {
+            'courseType': '3C',
+            'testType': 'FTT',
+            'language': 'English',
+            'viewOnly': False,
+        }
+
+        response = requests.post(
+            'https://booking.bbdc.sg/bbdc-back-service/api/booking/test/listTheoryTestSlotWithMaxCap',
+            cookies=cookies,
+            headers=headers,
+            json=json_data,
+        )
+
+        return json.loads(response.text)
+
 class BookingSlot:
+    type = None
     date = None
     startTime = None
     endTime = None
     slotType = None
 
-    def __init__(self, date, startTime, endTime, slotType) -> None:
+    def __init__(self, type, date, startTime, endTime, slotType) -> None:
+        self.type = type
         self.date = date
         self.startTime = startTime
         self.endTime = endTime
         self.slotType = slotType
     
     def __str__(self) -> str:
-        return f"On {self.date}, start {self.startTime}, end {self.endTime}."
+        return f"{self.type}: {self.date}, start {self.startTime}, end {self.endTime}."
 
 
+'''
+Initialise the Telegram bot instance to send alerts
+'''
 telegramBot = telegram.Bot(token=teleBotToken)
 async def notifySlot(slot):
     await telegramBot.send_message(chat_id=teleId, text=f"Slot found: {slot}")
 
+# Prompt user if they want to log in
 isLogin = 'n'
 while isLogin != 'y':
     isLogin = input("Would you like to log in? (y/n) > ")
@@ -143,6 +192,7 @@ while isLogin != 'y':
     elif isLogin != 'y':
         print("Please enter 'y' for yes, or 'n' for no.")
 
+# Execute login
 tryAgain = 'y'
 while tryAgain == 'y':
     session = Session()
@@ -161,29 +211,30 @@ while tryAgain == 'y':
         print(f"Successfully logged in as {session.userName}.")
         break
 
-targetDate = '2023-02-24 00:00:00'
+targetDates = ['2023-03-04 00:00:00']
+targetTypes = ['FTT']
+targetTimeAfter = '13:00'
 
+
+# Execute search based on user inputs
 async def queryLoop():
     while True:
-    # Type: FTE, FTP, etc.
-        '''
-        userInput = input("Enter type of theory lesson to find this month (FTE/FTP) > ")
-        if userInput == 'exit':
-            print("Quitting BBDC Booky - Bye!")
-            sys.exit()
-        '''
-        slotsData = session.queryTheorySlots('FTP', 'feb')
-        slotsFound = list()
-        for date, slots in slotsData['data']['releasedSlotListGroupByDay'].items():
-            for slot in slots:
-                slotsFound.append(BookingSlot(slot['slotRefDate'], slot['startTime'], slot['endTime'], 'FTP'))
-        slotsFound = sorted(slotsFound, key=lambda x: x.startTime)
-        slotsFound = sorted(slotsFound, key=lambda x: x.date)
-        print("--- Slots found: ---")
-        for slot in slotsFound:
-            if slot.date == targetDate:
-                await notifySlot(slot)
-            print(slot)
-        time.sleep(60)
+        for type in targetTypes:
+            slotsData = session.queryFTTSlots('mar')
+            slotsFound = list()
+            if slotsData['data']['releasedSlotListGroupByDay'] == None:
+                continue
+            for date, slots in slotsData['data']['releasedSlotListGroupByDay'].items():
+                for slot in slots:
+                    slotsFound.append(BookingSlot(type, slot['slotRefDate'], slot['startTime'], slot['endTime'], 'FTP'))
+            slotsFound = sorted(slotsFound, key=lambda x: x.startTime)
+            slotsFound = sorted(slotsFound, key=lambda x: x.date)
+            print("--- Slots found: ---")
+            for slot in slotsFound:
+                if slot.date in targetDates and slot.startTime > targetTimeAfter:
+                    print("SLOT FOUND!!!!!!!!!!!!")
+                    await notifySlot(slot)
+                print(slot)
+        time.sleep(15)
 
 asyncio.run(queryLoop())
