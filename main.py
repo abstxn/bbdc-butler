@@ -211,16 +211,15 @@ while tryAgain == 'y':
         print(f"Successfully logged in as {session.userName}.")
         break
 
-targetDates = ['2023-03-04 00:00:00']
-targetTypes = ['FTT']
-targetTimeAfter = '13:00'
+targetDates = ['2023-03-23 00:00:00']
+targetTypes = ['FTP']
 
 
 # Execute search based on user inputs
 async def queryLoop():
     while True:
         for type in targetTypes:
-            slotsData = session.queryFTTSlots('mar')
+            slotsData = session.queryTheorySlots(type, 'mar')
             slotsFound = list()
             if slotsData['data']['releasedSlotListGroupByDay'] == None:
                 continue
@@ -231,7 +230,7 @@ async def queryLoop():
             slotsFound = sorted(slotsFound, key=lambda x: x.date)
             print("--- Slots found: ---")
             for slot in slotsFound:
-                if slot.date in targetDates and slot.startTime > targetTimeAfter:
+                if slot.date in targetDates:
                     print("SLOT FOUND!!!!!!!!!!!!")
                     await notifySlot(slot)
                 print(slot)
