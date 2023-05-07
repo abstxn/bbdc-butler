@@ -5,10 +5,10 @@ import time
 import asyncio
 
 # 3rd-party Modules
-import requests
-import telegram
+import requests     # send and receive HTTPS
+import telegram     # for Telegram notifications upon slots found
 
-monthToInt = {
+month_to_int = {
     'jan': '01',
     'feb': '02',
     'mar': '03',
@@ -24,22 +24,179 @@ monthToInt = {
 }
 
 '''
-Opens the config file to read important details.
+###############################################################################
+# Get user login credentials and prepare Telegram bot                         #
+###############################################################################
 '''
-secrets = dict()
-with open('.config') as configFile:
-    lines = configFile.readlines()
-    for line in lines:
-        if line[:1] == '#':
-            continue
-        pair = line.split('::')
-        secrets[pair[0]] = pair[1].rstrip()
-# Declare details as global variables
-userId = secrets['userId']
-userPass = secrets['userPass']
-teleBotToken = secrets['teleBotToken']
-teleId = secrets['teleId']
 
+class BBDC_Login_Credentials:
+
+    username = 'NOT_INITIALIZED'
+    password = 'NOT_INITIALIZED'
+
+    def __init__(self, username: str, password: str):
+        self.username = username
+        self.password = password
+
+class Telegram_Details:
+
+    bot_token = 'NOT_INITIALIZED'
+    telegram_UID = 'NOT_INITIALIZED' # see @userinfobot in Telegram
+
+    def __init__(self, bot_token: str, telegram_UID: str):
+        self.bot_token = bot_token
+        self.telegram_UID = telegram_UID 
+    
+    @classmethod
+    def read_cache(cls):
+        try:
+            cached_file = open('.telegram', 'r')
+            text_lines = cached_file.readlines()
+            bot_token = text_lines[0].rstrip()
+            telegram_UID = text_lines[1].rstrip()
+            return cls(bot_token, telegram_UID)
+        except FileNotFoundError:
+            print('File containing Telegram details (bot token, user ID) not found. Aborting.')
+            exit(1)
+
+class Telegram_Connection:
+
+    telegram_UID: str = None
+    bot_instance: telegram.Bot = None
+
+    def __init__(self, telegram_details: Telegram_Details):
+        self.telegram_UID = telegram_details.telegram_UID
+        self.bot_instance = telegram.Bot(telegram_details.bot_token)
+    
+    async def send(self, message: str):
+        await self.bot_instance.send_message(self.telegram_UID, message)
+    
+    async def notify_available_slot(self, slot):
+        notification = f'Available slot:\n\n{slot}'
+        await self.bot_instance.send_message(self.telegram_UID, notification)
+
+# Prepare login credentials
+print("Username is the last 4 Characters of your NRIC/FIN and Birthdate (DDMMYYYY).\nExample: \"567A02071990\".")
+username = input("Enter username: ")
+password = input("Enter password: ")
+login_credentials = BBDC_Login_Credentials(username, password)
+
+# Telegram setup
+telegram_details = Telegram_Details.read_cache()
+telegram_connection = Telegram_Connection(telegram_details)
+asyncio.run(telegram_connection.send("Bot online."))
+
+'''
+###############################################################################
+# Establish a connection with BBDC's website                                  #
+###############################################################################
+'''
+
+class Login_Request:
+
+    url = 'https://booking.bbdc.sg/bbdc-back-service/api/auth/login'
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64; rv:109.0) Gecko/20100101 Firefox/112.0',
+        'Accept': 'application/json, text/plain, */*',
+        'Accept-Language': 'en-US,en;q=0.5',
+        'Content-Type': 'application/json;charset=utf-8',
+        'Origin': 'https://booking.bbdc.sg',
+        'DNT': '1',
+        'Connection': 'keep-alive',
+        'Referer': 'https://booking.bbdc.sg/',
+        'Sec-Fetch-Dest': 'empty',
+        'Sec-Fetch-Mode': 'cors',
+        'Sec-Fetch-Site': 'same-origin',
+        'Sec-GPC': '1',
+    }
+    json_payload = {}
+
+    def __init__(self, login_credentials: BBDC_Login_Credentials):
+        self.json_payload['userId'] = login_credentials.username
+        self.json_payload['userPass'] = login_credentials.password
+    
+    def send(self) -> requests.Response:
+        return requests.post(url=self.url, headers=self.headers, json=self.json_payload)
+
+    @staticmethod
+    def is_login_success(login_response: requests.Response) -> bool:
+        response_json = json.loads(login_response.text)
+        return response_json['success']
+
+    @staticmethod
+    def extract_session_token(login_response: requests.Response) -> str:
+        response_json = json.loads(login_response.text)
+        return response_json['data']['tokenContent']
+
+login_request = Login_Request(login_credentials)
+login_response = login_request.send()
+session_token = None
+if Login_Request.is_login_success(login_response):
+    print('Login successful.')
+    session_token = Login_Request.extract_session_token(login_response)
+else:
+    response_message = json.loads(login_response.text)['message']
+    print('Login unsuccessful.')
+    print(f'Error message: \"{response_message}\"')
+    exit(1)
+
+'''
+###############################################################################
+# Making requests with the established session token                          #
+###############################################################################
+'''
+
+class Practical_Exist_Request:
+
+    NO_SLOT_RELEASED = 'There is no slot released for booking at the moment.'
+    url ='https://booking.bbdc.sg/bbdc-back-service/api/booking/c3practical/checkExistsC3PracticalTrainingSlot'
+    cookies = {'bbdc-token': None}
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64; rv:109.0) Gecko/20100101 Firefox/112.0',
+        'Accept': 'application/json, text/plain, */*',
+        'Accept-Language': 'en-US,en;q=0.5',
+        'Content-Type': 'application/json;charset=utf-8',
+        'Authorization': None,
+        'JSESSIONID': 'Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJBQ0NfSUQiOiI5NDg5NDYiLCJUUkFfTE9HSU4iOiI5NjdHMDkwODIwMDAiLCJpc3MiOiJCQkRDIiwiTlJJQyI6IlQwMDI2OTY3RyIsImV4cCI6MTMwNTMyNDU0ODkzfQ.2TRNux6TwJU8XZU5IjcpbhuaHIj0y7cR8WKtxorzUeA',
+        'Origin': 'https://booking.bbdc.sg',
+        'DNT': '1',
+        'Connection': 'keep-alive',
+        'Referer': 'https://booking.bbdc.sg/',
+        'Sec-Fetch-Dest': 'empty',
+        'Sec-Fetch-Mode': 'cors',
+        'Sec-Fetch-Site': 'same-origin',
+        'Sec-GPC': '1',
+    }
+    json_payload = {"insInstructorId":""}
+
+    def __init__(self, session_token):
+        print(f'Using session token: {session_token}')
+        self.cookies['bbdc-token'] = session_token
+        self.headers['Authorization'] = session_token
+    
+    def send(self) -> requests.Response:
+        return requests.post(url=self.url, cookies=self.cookies, headers=self.headers, json=self.json_payload)
+    
+    @staticmethod
+    def is_practical_exist(practical_exist_response: requests.Response):
+        response_json = json.loads(practical_exist_response.text)
+        response_message = response_json['message']
+        if response_message == Practical_Exist_Request.NO_SLOT_RELEASED:
+            return False
+        else:
+            return True
+
+practical_exist_request = Practical_Exist_Request(session_token)
+while True:
+    practical_exist_response = practical_exist_request.send()
+    response_message = json.loads(practical_exist_response.text)['message']
+    print(f'{time.strftime("%H:%M:%S", time.localtime())}: {response_message}')
+    if response_message != Practical_Exist_Request.NO_SLOT_RELEASED:
+        asyncio.run(telegram_connection.send("Available slots detected! GO GO GO!"))
+    # if Practical_Exist_Request.is_practical_exist(practical_exist_response):
+    #     print('There are slots available for booking!')
+    #     break
+    time.sleep(5)
 
 '''
 Encapsulates a login session.
@@ -104,7 +261,7 @@ class Session:
             'theoryType': type,
             'stageSubNo': '0',
             'language': 'English',
-            'releasedSlotMonth': f'2023{monthToInt[month]}',
+            'releasedSlotMonth': f'2023{month_to_int[month]}',
         }
         response = requests.post(
             'https://booking.bbdc.sg/bbdc-back-service/api/booking/theory/listTheoryLessonByDate',
@@ -176,41 +333,6 @@ class BookingSlot:
 
 
 '''
-Initialise the Telegram bot instance to send alerts
-'''
-telegramBot = telegram.Bot(token=teleBotToken)
-async def notifySlot(slot):
-    await telegramBot.send_message(chat_id=teleId, text=f"Slot found: {slot}")
-
-# Prompt user if they want to log in
-isLogin = 'n'
-while isLogin != 'y':
-    isLogin = input("Would you like to log in? (y/n) > ")
-    if isLogin == 'n':
-        print("Quitting BBDC Booky - Bye!")
-        sys.exit()
-    elif isLogin != 'y':
-        print("Please enter 'y' for yes, or 'n' for no.")
-
-# Execute login
-tryAgain = 'y'
-while tryAgain == 'y':
-    session = Session()
-    isSuccess = session.login()
-    if not isSuccess:
-        tryAgain = input("Error logging in. Try again? (y/n) > ")
-        if tryAgain == 'n':
-            print("Quitting BBDC Booky - Bye!")
-            sys.exit()
-        elif tryAgain == 'y':
-            continue
-        else:
-            print("Did not enter y/n. Quitting program - Bye!")
-            sys.exit()
-    else:
-        print(f"Successfully logged in as {session.userName}.")
-        break
-
 targetDates = ['2023-03-23 00:00:00']
 targetTypes = ['FTP']
 
@@ -237,3 +359,4 @@ async def queryLoop():
         time.sleep(15)
 
 asyncio.run(queryLoop())
+'''
