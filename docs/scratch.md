@@ -11,3 +11,11 @@ All a "connection" to the server is (in this case), is a single session token. H
 - did abstracting over several details
 - since I could not extract a legitmate practical slot API call from the website (no slots available), the temporary solution is to loop the bot until slots are found
     - when slots found, quickly fetch a legitmate request to work on proper request
+
+# 2023-05-08
+
+- fix bugs with async/await usage
+- cache session token, and use that for login first, if it doesn't work (toke expired), only then prompt for login credentials and establish a new session token
+- next steps:
+    - create request for slot check
+    - reestablish connection after some time (5 mins?) to allow for independent execution

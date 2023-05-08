@@ -4,6 +4,7 @@
 ### My Additions ###
 #.config
 .telegram
+.cached_token
 
 ### Linux ###
 *~

@@ -25,18 +25,9 @@ month_to_int = {
 
 '''
 ###############################################################################
-# Get user login credentials and prepare Telegram bot                         #
+# Telegram setup                                                              #
 ###############################################################################
 '''
-
-class BBDC_Login_Credentials:
-
-    username = 'NOT_INITIALIZED'
-    password = 'NOT_INITIALIZED'
-
-    def __init__(self, username: str, password: str):
-        self.username = username
-        self.password = password
 
 class Telegram_Details:
 
@@ -54,9 +45,10 @@ class Telegram_Details:
             text_lines = cached_file.readlines()
             bot_token = text_lines[0].rstrip()
             telegram_UID = text_lines[1].rstrip()
+            cached_file.close()
             return cls(bot_token, telegram_UID)
         except FileNotFoundError:
-            print('File containing Telegram details (bot token, user ID) not found. Aborting.')
+            print('File containing Telegram details (bot token, user ID) not found.')
             exit(1)
 
 class Telegram_Connection:
@@ -67,6 +59,7 @@ class Telegram_Connection:
     def __init__(self, telegram_details: Telegram_Details):
         self.telegram_UID = telegram_details.telegram_UID
         self.bot_instance = telegram.Bot(telegram_details.bot_token)
+        print('Initialized Telegram bot.')
     
     async def send(self, message: str):
         await self.bot_instance.send_message(self.telegram_UID, message)
@@ -75,22 +68,33 @@ class Telegram_Connection:
         notification = f'Available slot:\n\n{slot}'
         await self.bot_instance.send_message(self.telegram_UID, notification)
 
-# Prepare login credentials
-print("Username is the last 4 Characters of your NRIC/FIN and Birthdate (DDMMYYYY).\nExample: \"567A02071990\".")
-username = input("Enter username: ")
-password = input("Enter password: ")
-login_credentials = BBDC_Login_Credentials(username, password)
-
-# Telegram setup
 telegram_details = Telegram_Details.read_cache()
 telegram_connection = Telegram_Connection(telegram_details)
-asyncio.run(telegram_connection.send("Bot online."))
+
+main_loop = asyncio.new_event_loop() # create new asyncio event loop
+main_loop.run_until_complete(telegram_connection.send("Bot online."))
 
 '''
 ###############################################################################
-# Establish a connection with BBDC's website                                  #
+# Establishing session token                                                  #
 ###############################################################################
 '''
+
+class BBDC_Login_Credentials:
+
+    username = 'NOT_INITIALIZED'
+    password = 'NOT_INITIALIZED'
+
+    def __init__(self, username: str, password: str):
+        self.username = username
+        self.password = password
+    
+    @classmethod
+    def prompt_login_credentials(cls):
+        print("\nUsername is the last 4 Characters of your NRIC/FIN and Birthdate (DDMMYYYY).\nExample: \"567A02071990\".\n")
+        username = input("Enter username: ")
+        password = input("Enter password: ")
+        return cls(username, password)
 
 class Login_Request:
 
@@ -117,6 +121,12 @@ class Login_Request:
     
     def send(self) -> requests.Response:
         return requests.post(url=self.url, headers=self.headers, json=self.json_payload)
+    
+    @staticmethod
+    def try_login() -> requests.Response:
+        login_credentials = BBDC_Login_Credentials.prompt_login_credentials()
+        login_request = Login_Request(login_credentials)
+        return login_request.send()
 
     @staticmethod
     def is_login_success(login_response: requests.Response) -> bool:
@@ -128,17 +138,95 @@ class Login_Request:
         response_json = json.loads(login_response.text)
         return response_json['data']['tokenContent']
 
-login_request = Login_Request(login_credentials)
-login_response = login_request.send()
-session_token = None
-if Login_Request.is_login_success(login_response):
-    print('Login successful.')
-    session_token = Login_Request.extract_session_token(login_response)
-else:
-    response_message = json.loads(login_response.text)['message']
-    print('Login unsuccessful.')
-    print(f'Error message: \"{response_message}\"')
-    exit(1)
+class Token:
+
+    # check whether a token is already cached (cache file exists + there is content)
+    @staticmethod
+    def is_cached():
+        try:
+            cached_file = open('.cached_token', 'r')
+            cached_token = cached_file.readline().rstrip()
+            cached_file.close()
+            if cached_token == '':
+                print('Cache file is empty.')
+                return False
+            else:
+                print(f'Found cached token: \"{cached_token}\"')
+                return True
+        except FileNotFoundError:
+            print('No cache file found.')
+            return False
+    
+    # read the first line of cache file
+    @staticmethod
+    def read_cache() -> str:
+        if Token.is_cached():
+            cached_file = open('.cached_token', 'r')
+            cached_token = cached_file.readline().rstrip()
+            cached_file.close()
+            return cached_token
+        else:
+            return None
+    
+    # caches a token into the cache file
+    @staticmethod
+    def cache(token: str):
+        cached_file = open('.cached_token', 'w')
+        cached_file.write(token)
+        cached_file.close()
+
+    # checks whether the supplied token (str) is valid
+    @staticmethod
+    def is_valid(token: str) -> bool:
+        cookies = {
+            'bbdc-token': token,
+        }
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64; rv:109.0) Gecko/20100101 Firefox/112.0',
+            'Accept': 'application/json, text/plain, */*',
+            'Accept-Language': 'en-US,en;q=0.5',
+            'Content-Type': 'application/json;charset=utf-8',
+            'Authorization': token,
+            'JSESSIONID': 'Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJBQ0NfSUQiOiI5NDg5NDYiLCJUUkFfTE9HSU4iOiI5NjdHMDkwODIwMDAiLCJpc3MiOiJCQkRDIiwiTlJJQyI6IlQwMDI2OTY3RyIsImV4cCI6MTMwNTMyNTI4OTI2fQ._c0kdtnWp5qKXFu_Hg6x8zo1sDkRB5hbh7bUhzQdiZw',
+            'Origin': 'https://booking.bbdc.sg',
+            'DNT': '1',
+            'Connection': 'keep-alive',
+            'Referer': 'https://booking.bbdc.sg/',
+            'Sec-Fetch-Dest': 'empty',
+            'Sec-Fetch-Mode': 'cors',
+            'Sec-Fetch-Site': 'same-origin',
+            'Sec-GPC': '1',
+        }
+        json_data = {}
+        response = requests.post(
+            'https://booking.bbdc.sg/bbdc-back-service/api/account/getUserProfile',
+            cookies=cookies,
+            headers=headers,
+            json=json_data,
+        )
+        return json.loads(response.text)['success']
+
+    @staticmethod
+    def get() -> str:
+        current_token = Token.read_cache()
+        while not Token.is_valid(current_token):
+            login_response = Login_Request.try_login()
+            current_token = Login_Request.extract_session_token(login_response)
+        Token.cache(current_token)
+        return current_token
+
+        '''
+        while True:
+            login_response = Login_Request.try_login()
+            if Login_Request.is_login_success(login_response):
+                self.token = Login_Request.extract_session_token(login_response)
+                self.cache()
+                break
+            response_message = json.loads(login_response.text)['message']
+            print(f'Error message: \"{response_message}\"')
+        '''
+
+session_token = Token.get()
 
 '''
 ###############################################################################
@@ -170,7 +258,6 @@ class Practical_Exist_Request:
     json_payload = {"insInstructorId":""}
 
     def __init__(self, session_token):
-        print(f'Using session token: {session_token}')
         self.cookies['bbdc-token'] = session_token
         self.headers['Authorization'] = session_token
     
@@ -186,17 +273,27 @@ class Practical_Exist_Request:
         else:
             return True
 
-practical_exist_request = Practical_Exist_Request(session_token)
-while True:
-    practical_exist_response = practical_exist_request.send()
-    response_message = json.loads(practical_exist_response.text)['message']
-    print(f'{time.strftime("%H:%M:%S", time.localtime())}: {response_message}')
-    if response_message != Practical_Exist_Request.NO_SLOT_RELEASED:
-        asyncio.run(telegram_connection.send("Available slots detected! GO GO GO!"))
-    # if Practical_Exist_Request.is_practical_exist(practical_exist_response):
-    #     print('There are slots available for booking!')
-    #     break
-    time.sleep(5)
+async def query_loop():
+    practical_exist_request = Practical_Exist_Request(session_token)
+    while True:
+        practical_exist_response = practical_exist_request.send()
+        response_message = json.loads(practical_exist_response.text)['message']
+        print(f'{time.strftime("%H:%M:%S", time.localtime())}: {response_message}')
+
+        if response_message != Practical_Exist_Request.NO_SLOT_RELEASED:
+            await telegram_connection.send("Available slots detected! GO GO GO!")
+        else:
+            await asyncio.sleep(5)
+
+main_loop.run_until_complete(query_loop())
+main_loop.close() # teardown asyncio event loop
+
+
+'''
+###############################################################################
+# Old code (but here for reference)                                           #
+###############################################################################
+'''
 
 '''
 Encapsulates a login session.
