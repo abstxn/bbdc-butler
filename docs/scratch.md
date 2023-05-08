@@ -19,3 +19,4 @@ All a "connection" to the server is (in this case), is a single session token. H
 - next steps:
     - create request for slot check
     - reestablish connection after some time (5 mins?) to allow for independent execution
+- abstracted out telegram and token classes
