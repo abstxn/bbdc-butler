@@ -2,9 +2,7 @@
 # Edit at https://www.toptal.com/developers/gitignore?templates=python,macos,windows,linux
 
 ### My Additions ###
-#.config
-.telegram
-.cached_token
+secrets/*
 
 ### Linux ###
 *~
