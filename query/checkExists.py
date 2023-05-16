@@ -21,7 +21,7 @@ headers = {
 }
 json_payload = {"insInstructorId":""}
 
-def query(token: str) -> str:
+def send_using(token: str) -> str:
     cookies['bbdc-token'] = token
     headers['Authorization'] = token
     response = requests.post(url, cookies=cookies, headers=headers, json=json_payload)

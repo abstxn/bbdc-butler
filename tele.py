@@ -1,32 +1,24 @@
-'''
-Module encapsulates an instance of a Telegram bot's chat with a particular user.
-'''
-
 import telegram
 import asyncio
+from dotenv import dotenv_values
+
+values = dotenv_values('env/tele.env')
+BOT_API = values['BOT_API']
+USER_ID = values['USER_ID']
 
 class Bot:
 
-    api_token = None
-    tele_user_ID = None
-    bot_instance = None
-
-    cache_file_dir = './secrets/telegram-info'
+    bot = telegram.Bot(BOT_API)
     loop = asyncio.new_event_loop()
 
-    def __init__(self):
-        file = open(self.cache_file_dir, 'r')
-        lines = file.readlines()
-        self.api_token = lines[0].rstrip()
-        self.tele_user_ID = lines[1].rstrip()
-        self.bot_instance = telegram.Bot(self.api_token)
+    def __init__(self) -> None:
+        print('Initializing bot...')
     
     def send(self, message:str):
-        self.loop.run_until_complete(self.bot_instance.send_message(self.tele_user_ID, message))
-    
-    def stop(self):
-        self.loop.close()
+        print(f'Sending Telegram message: {message}')
+        self.loop.run_until_complete(self.bot.send_message(USER_ID, message))
 
-
-def start() -> Bot:
-    return Bot()
+def start_bot() -> Bot:
+    bot = Bot()
+    bot.send('Bot online.')
+    return bot
