@@ -24,6 +24,7 @@ def is_valid(token: str) -> bool:
 def login() -> str:
     print('Attempting to login...')
     response = loginRequest.send_using(USERNAME, PASSWORD)
+    print(response.text)
     token = json.loads(response.text)['data']['tokenContent']
     print(f'Logged in. Session token: {token}')
     return token

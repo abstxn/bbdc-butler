@@ -1,5 +1,7 @@
 # bbdc-butler
 
+NOTICE: Project is dysfunctional due to CAPTCHA added in May 2023.
+
 ## About
 
 A simple Python script to periodically search for practical training slots at BBDC.
@@ -39,3 +41,9 @@ for logins and authentication. The directory structure should be as such:
 
 - [ ] Use `python-dotenv` to handle secrets
 - [ ] Use `os/path` to allow execution from any directory
+
+# Dependencies
+
+- python-dotenv
+- python-telegram-bot
+- python-requests
